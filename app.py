@@ -2,6 +2,7 @@ import feedparser
 import streamlit as st
 from datetime import datetime
 import time
+from openai import OpenAI
 
 # 页面配置
 st.set_page_config(
@@ -18,25 +19,51 @@ st.markdown("---")
 ARXIV_RSS_URL = "http://export.arxiv.org/rss/cs.AI"  # AI 领域的 RSS
 KEYWORDS = ["Artificial Intelligence", "Machine Learning", "Deep Learning"]
 
-# Mock LLM API 调用函数
-def summarize_text(text):
+# 智谱 AI 总结函数
+def summarize_text(text, api_key):
     """
-    调用 LLM API 进行文本总结（目前使用 Mock 数据）
+    调用智谱 AI 进行文本总结
 
     Args:
         text (str): 需要总结的文本
+        api_key (str): 智谱 AI API Key
 
     Returns:
-        str: 总结后的文本
+        str: 总结后的文本，失败时返回 None
     """
-    # 这里是 Mock 数据，实际使用时替换为真实的 API 调用
-    mock_summary = f"""
-    [AI 总结] 本文主要研究了人工智能领域的前沿进展。论文提出了创新性的方法，
-    在相关任务上取得了显著的性能提升。研究结果表明，该方法具有很好的
-    应用前景和实用价值。作者通过充分的实验验证了其有效性，为该领域
-    的发展做出了重要贡献。
-    """
-    return mock_summary.strip()
+    if not api_key:
+        return None
+
+    try:
+        # 初始化智谱 AI 客户端（OpenAI 兼容模式）
+        client = OpenAI(
+            api_key=api_key,
+            base_url="https://open.bigmodel.cn/api/paas/v4/"
+        )
+
+        # 调用 API
+        response = client.chat.completions.create(
+            model="glm-4",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "你是一个专业的科研论文助手。请将这段摘要翻译成通顺的中文，并以 bullet points 的形式列出 3 条核心创新点。"
+                },
+                {
+                    "role": "user",
+                    "content": text
+                }
+            ],
+            temperature=0.7,
+            max_tokens=1000
+        )
+
+        # 提取返回的总结
+        summary = response.choices[0].message.content
+        return summary
+
+    except Exception as e:
+        raise Exception(f"智谱 API 调用失败: {str(e)}")
 
 def fetch_arxiv_papers():
     """
@@ -68,12 +95,13 @@ def fetch_arxiv_papers():
         st.error(f"抓取 ArXiv 论文时发生错误: {str(e)}")
         return []
 
-def display_paper(paper):
+def display_paper(paper, api_key):
     """
     显示单篇论文的信息
 
     Args:
         paper (dict): 论文信息字典
+        api_key (str): 智谱 AI API Key
     """
     with st.expander(f"**{paper['title'][:100]}{'...' if len(paper['title']) > 100 else ''}**"):
         # 标题
@@ -104,16 +132,32 @@ def display_paper(paper):
 
         # AI 总结
         st.markdown("#### 🤖 AI 总结")
-        with st.spinner("正在生成总结..."):
-            time.sleep(1)  # 模拟 API 调用延迟
-            summary = summarize_text(paper['summary'])
-            st.write(summary)
+        if not api_key:
+            st.warning("⚠️ 请在侧边栏填写智谱 AI API Key 以启用 AI 总结功能")
+        else:
+            with st.spinner("正在生成总结..."):
+                try:
+                    summary = summarize_text(paper['summary'], api_key)
+                    if summary:
+                        st.write(summary)
+                    else:
+                        st.warning("⚠️ 总结生成失败")
+                except Exception as e:
+                    st.error(f"❌ {str(e)}")
 
 # 主界面
 def main():
     # 侧边栏配置
     with st.sidebar:
         st.header("⚙️ 配置")
+
+        # 智谱 AI API Key 输入
+        st.subheader("🔑 API 设置")
+        api_key = st.text_input(
+            "智谱 AI API Key",
+            type="password",
+            help="请输入您的智谱 AI API Key 以启用 AI 总结功能"
+        )
 
         # 显示抓取的论文数量
         st.subheader("📊 统计信息")
@@ -151,7 +195,7 @@ def main():
 
         # 显示论文
         for paper in filtered_papers:
-            display_paper(paper)
+            display_paper(paper, api_key)
     else:
         st.warning("未能获取到论文数据，请检查网络连接或稍后重试。")
 
